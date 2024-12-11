@@ -1,126 +1,165 @@
 import logging
-from abc import ABC, abstractmethod
-
 import optuna
 import pandas as pd
 import xgboost as xgb
 from lightgbm import LGBMRegressor
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression
+from sklearn.base import RegressorMixin
 
 
-class Model(ABC):
+class HyperparameterOptimization:
     """
-    Abstract base class for all models.
-    """
-
-    @abstractmethod
-    def train(self, x_train, y_train):
-        """
-        Trains the model on the given data.
-
-        Args:
-            x_train: Training data
-            y_train: Target data
-        """
-        pass
-
-    @abstractmethod
-    def optimize(self, trial, x_train, y_train, x_test, y_test):
-        """
-        Optimizes the hyperparameters of the model.
-
-        Args:
-            trial: Optuna trial object
-            x_train: Training data
-            y_train: Target data
-            x_test: Testing data
-            y_test: Testing target
-        """
-        pass
-
-
-class RandomForestModel(Model):
-    """
-    RandomForestModel that implements the Model interface.
+    Class for performing hyperparameter optimization.
     """
 
-    def train(self, x_train, y_train, **kwargs):
-        reg = RandomForestRegressor(**kwargs)
-        reg.fit(x_train, y_train)
-        return reg
-
-    def optimize(self, trial, x_train, y_train, x_test, y_test):
-        n_estimators = trial.suggest_int("n_estimators", 1, 200)
-        max_depth = trial.suggest_int("max_depth", 1, 20)
-        min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
-        reg = self.train(x_train, y_train, n_estimators=n_estimators, max_depth=max_depth, min_samples_split=min_samples_split)
-        return reg.score(x_test, y_test)
-
-class LightGBMModel(Model):
-    """
-    LightGBMModel that implements the Model interface.
-    """
-
-    def train(self, x_train, y_train, **kwargs):
-        reg = LGBMRegressor(**kwargs)
-        reg.fit(x_train, y_train)
-        return reg
-
-    def optimize(self, trial, x_train, y_train, x_test, y_test):
-        n_estimators = trial.suggest_int("n_estimators", 1, 200)
-        max_depth = trial.suggest_int("max_depth", 1, 20)
-        learning_rate = trial.suggest_uniform("learning_rate", 0.01, 0.99)
-        reg = self.train(x_train, y_train, n_estimators=n_estimators, learning_rate=learning_rate, max_depth=max_depth)
-        return reg.score(x_test, y_test)
-
-
-class XGBoostModel(Model):
-    """
-    XGBoostModel that implements the Model interface.
-    """
-
-    def train(self, x_train, y_train, **kwargs):
-        reg = xgb.XGBRegressor(**kwargs)
-        reg.fit(x_train, y_train)
-        return reg
-
-    def optimize(self, trial, x_train, y_train, x_test, y_test):
-        n_estimators = trial.suggest_int("n_estimators", 1, 200)
-        max_depth = trial.suggest_int("max_depth", 1, 30)
-        learning_rate = trial.suggest_loguniform("learning_rate", 1e-7, 10.0)
-        reg = self.train(x_train, y_train, n_estimators=n_estimators, learning_rate=learning_rate, max_depth=max_depth)
-        return reg.score(x_test, y_test)
-
-
-class LinearRegressionModel(Model):
-    """
-    LinearRegressionModel that implements the Model interface.
-    """
-
-    def train(self, x_train, y_train, **kwargs):
-        reg = LinearRegression(**kwargs)
-        reg.fit(x_train, y_train)
-        return reg
-
-    # For linear regression, there might not be hyperparameters that we want to tune, so we can simply return the score
-    def optimize(self, trial, x_train, y_train, x_test, y_test):
-        reg = self.train(x_train, y_train)
-        return reg.score(x_test, y_test)
-
-class HyperparameterTuner:
-    """
-    Class for performing hyperparameter tuning. It uses Model strategy to perform tuning.
-    """
-
-    def __init__(self, model, x_train, y_train, x_test, y_test):
-        self.model = model
+    def __init__(
+        self,
+        x_train: pd.DataFrame,
+        y_train: pd.Series,
+        x_test: pd.DataFrame,
+        y_test: pd.Series,
+    ) -> None:
+        """Initialize the class with training and test data."""
         self.x_train = x_train
         self.y_train = y_train
         self.x_test = x_test
         self.y_test = y_test
 
-    def optimize(self, n_trials=100):
+    def optimize_random_forest(self, trial: optuna.Trial) -> float:
+        """Method for optimizing Random Forest."""
+        try:
+            n_estimators = trial.suggest_int("n_estimators", 50, 200)
+            max_depth = trial.suggest_int("max_depth", 5, 30)
+            min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
+
+            model = RandomForestRegressor(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                min_samples_split=min_samples_split,
+            )
+            model.fit(self.x_train, self.y_train)
+            return model.score(self.x_test, self.y_test)
+        except Exception as e:
+            logging.error("Error optimizing Random Forest: %s", e)
+            raise
+
+    def optimize_lightgbm(self, trial: optuna.Trial) -> float:
+        """Method for optimizing LightGBM."""
+        try:
+            n_estimators = trial.suggest_int("n_estimators", 50, 200)
+            max_depth = trial.suggest_int("max_depth", 5, 30)
+            learning_rate = trial.suggest_uniform("learning_rate", 0.01, 0.3)
+
+            model = LGBMRegressor(
+                n_estimators=n_estimators,
+                learning_rate=learning_rate,
+                max_depth=max_depth,
+            )
+            model.fit(self.x_train, self.y_train)
+            return model.score(self.x_test, self.y_test)
+        except Exception as e:
+            logging.error("Error optimizing LightGBM: %s", e)
+            raise
+
+    def optimize_xgboost(self, trial: optuna.Trial) -> float:
+        """Method for optimizing XGBoost."""
+        try:
+            params = {
+                "max_depth": trial.suggest_int("max_depth", 5, 30),
+                "learning_rate": trial.suggest_loguniform("learning_rate", 1e-4, 0.3),
+                "n_estimators": trial.suggest_int("n_estimators", 50, 200),
+            }
+
+            model = xgb.XGBRegressor(**params)
+            model.fit(self.x_train, self.y_train)
+            return model.score(self.x_test, self.y_test)
+        except Exception as e:
+            logging.error("Error optimizing XGBoost: %s", e)
+            raise
+
+
+class ModelTrainer:
+    """
+    Class for training machine learning models.
+    """
+
+    def __init__(
+        self,
+        x_train: pd.DataFrame,
+        y_train: pd.Series,
+        x_test: pd.DataFrame,
+        y_test: pd.Series,
+    ) -> None:
+        """Initialize the class with training and test data."""
+        self.x_train = x_train
+        self.y_train = y_train
+        self.x_test = x_test
+        self.y_test = y_test
+
+    def _train_model_with_optimization(self, optimizer_func, n_trials: int) -> RegressorMixin:
+        """Helper function to optimize and train a model."""
+        hyper_opt = HyperparameterOptimization(
+            self.x_train, self.y_train, self.x_test, self.y_test
+        )
         study = optuna.create_study(direction="maximize")
-        study.optimize(lambda trial: self.model.optimize(trial, self.x_train, self.y_train, self.x_test, self.y_test), n_trials=n_trials)
-        return study.best_trial.params
+        study.optimize(optimizer_func, n_trials=n_trials)
+        best_params = study.best_trial.params
+        logging.info("Best parameters: %s", best_params)
+        return best_params
+
+    def random_forest_trainer(self, fine_tuning: bool = True) -> RegressorMixin:
+        """Train a Random Forest model."""
+        try:
+            if fine_tuning:
+                best_params = self._train_model_with_optimization(
+                    lambda trial: HyperparameterOptimization(
+                        self.x_train, self.y_train, self.x_test, self.y_test
+                    ).optimize_random_forest(trial),
+                    n_trials=10,
+                )
+                model = RandomForestRegressor(**best_params)
+            else:
+                model = RandomForestRegressor(n_estimators=100, max_depth=20, min_samples_split=10)
+            model.fit(self.x_train, self.y_train)
+            return model
+        except Exception as e:
+            logging.error("Error in training Random Forest: %s", e)
+            raise
+
+    def lightgbm_trainer(self, fine_tuning: bool = True) -> RegressorMixin:
+        """Train a LightGBM model."""
+        try:
+            if fine_tuning:
+                best_params = self._train_model_with_optimization(
+                    lambda trial: HyperparameterOptimization(
+                        self.x_train, self.y_train, self.x_test, self.y_test
+                    ).optimize_lightgbm(trial),
+                    n_trials=10,
+                )
+                model = LGBMRegressor(**best_params)
+            else:
+                model = LGBMRegressor(n_estimators=100, learning_rate=0.05, max_depth=20)
+            model.fit(self.x_train, self.y_train)
+            return model
+        except Exception as e:
+            logging.error("Error in training LightGBM: %s", e)
+            raise
+
+    def xgboost_trainer(self, fine_tuning: bool = True) -> RegressorMixin:
+        """Train an XGBoost model."""
+        try:
+            if fine_tuning:
+                best_params = self._train_model_with_optimization(
+                    lambda trial: HyperparameterOptimization(
+                        self.x_train, self.y_train, self.x_test, self.y_test
+                    ).optimize_xgboost(trial),
+                    n_trials=10,
+                )
+                model = xgb.XGBRegressor(**best_params)
+            else:
+                model = xgb.XGBRegressor(n_estimators=100, learning_rate=0.05, max_depth=20)
+            model.fit(self.x_train, self.y_train)
+            return model
+        except Exception as e:
+            logging.error("Error in training XGBoost: %s", e)
+            raise
